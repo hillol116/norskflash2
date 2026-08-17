@@ -36,11 +36,6 @@ export default function Home() {
       return
     }
 
-    if (!hasKey) {
-      setError('Please add your Gemini API key in Settings before searching.')
-      return
-    }
-
     setLoading(true)
     setError('')
     setResult(null)
@@ -50,7 +45,7 @@ export default function Home() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-gemini-key': geminiKey,
+          'x-gemini-key': geminiKey || '',
         },
         body: JSON.stringify({ word: word.trim() }),
       })
@@ -112,7 +107,7 @@ export default function Home() {
 
       <div className="mx-auto max-w-3xl px-4 py-10 sm:py-16">
         <div className="mb-10 text-center">
-          <h1 className="text-4xl font-extrabold text-slate-900">NorskFlash</h1>      
+          <h1 className="text-4xl font-extrabold text-slate-900">NorskFlash</h1> 
           <p className="mt-3 text-lg text-slate-600">
             Norwegian-English dictionary & flashcards
           </p>
@@ -125,7 +120,7 @@ export default function Home() {
             </h2>
             <p className="mb-6 text-slate-600">
               Use the profile menu in the top-right corner to create a profile. Each
-              profile keeps its own Gemini API key and flashcard deck.
+              profile keeps its own flashcard deck.
             </p>
           </section>
         ) : (
