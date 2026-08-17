@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({ apiKey })
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       contents: `Provide detailed Norwegian dictionary information for the word "${word}". Return response as JSON containing: norwegian_word, english_meaning, forms (object with grammatical forms), sentences (array of objects with norwegian and english keys), and nuances.`,
       config: {
         responseMimeType: 'application/json',
