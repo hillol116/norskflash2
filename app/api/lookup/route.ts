@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
 export async function POST(request: Request) {
   try {
-    const { word, apiKey: userKey } = await request.json()
+    const { word } = await request.json()
+    const headerKey = request.headers.get('x-gemini-key')
 
-    // Priority: 1. User key passed from browser, 2. Vercel environment key
-    const apiKey = userKey || process.env.GEMINI_API_KEY
+    const apiKey = headerKey || process.env.GEMINI_API_KEY
 
     if (!apiKey) {
       return NextResponse.json(
@@ -15,14 +15,20 @@ export async function POST(request: Request) {
       )
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    const ai = new GoogleGenAI({ apiKey })
 
-    const prompt = `Provide detailed Norwegian dictionary information for the word "${word}". Return response as JSON.`
-    const result = await model.generateContent(prompt)
-    const text = result.response.text()
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Provide detailed Norwegian dictionary information for the word "${word}". Return response as JSON containing: norwegian_word, english_meaning, forms (object with grammatical forms), sentences (array of objects with norwegian and english keys), and nuances.`,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    })
 
-    return NextResponse.json({ result: text })
+    const text = response.text || '{}'
+    const parsed = JSON.parse(text)
+
+    return NextResponse.json(parsed)
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || 'Error processing request' },
