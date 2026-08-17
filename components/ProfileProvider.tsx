@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type Profile = { id: string; username: string }
@@ -27,62 +27,95 @@ const ProfileContext = createContext<ProfileContextType | undefined>(undefined)
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null)
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
-  const [ready, setReady] = useState(true)
+  const [ready] = useState(true)
 
   async function loadFlashcards(profileId: string) {
-    const { data } = await supabase
-      .from('flashcards')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: false })
-    if (data) setFlashcards(data)
+    try {
+      const { data, error } = await supabase
+        .from('flashcards')
+        .select('*')
+        .eq('profile_id', profileId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error loading flashcards:', error.message)
+        return
+      }
+      if (data) setFlashcards(data)
+    } catch (err) {
+      console.error('Failed to load flashcards:', err)
+    }
   }
 
   async function selectOrCreateProfile(username: string) {
     const cleanName = username.trim().toLowerCase()
     if (!cleanName) return
 
-    // Try fetching existing profile
-    let { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('username', cleanName)
-      .maybeSingle()
-
-    // If profile doesn't exist, create it
-    if (!profile) {
-      const { data: newProfile, error } = await supabase
+    try {
+      // 1. Try fetching existing profile
+      let { data: profile, error: fetchError } = await supabase
         .from('profiles')
-        .insert({ username: cleanName })
-        .select()
-        .single()
-      if (error) throw error
-      profile = newProfile
-    }
+        .select('*')
+        .eq('username', cleanName)
+        .maybeSingle()
 
-    if (profile) {
-      setActiveProfile(profile)
-      await loadFlashcards(profile.id)
+      if (fetchError) {
+        console.error('Error fetching profile:', fetchError.message)
+      }
+
+      // 2. If profile doesn't exist, create it
+      if (!profile) {
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert({ username: cleanName })
+          .select()
+          .single()
+
+        if (insertError) {
+          console.error('Error creating profile:', insertError.message)
+          alert(`Failed to create profile: ${insertError.message}`)
+          return
+        }
+        profile = newProfile
+      }
+
+      if (profile) {
+        setActiveProfile(profile)
+        await loadFlashcards(profile.id)
+      }
+    } catch (err: any) {
+      console.error('Profile action failed:', err)
+      alert(`Error: ${err.message || 'Could not connect to database'}`)
     }
   }
 
   async function saveFlashcard(card: Omit<Flashcard, 'id'>) {
     if (!activeProfile) return
-    const { data, error } = await supabase
-      .from('flashcards')
-      .insert({ ...card, profile_id: activeProfile.id })
-      .select()
-      .single()
+    try {
+      const { data, error } = await supabase
+        .from('flashcards')
+        .insert({ ...card, profile_id: activeProfile.id })
+        .select()
+        .single()
 
-    if (!error && data) {
-      setFlashcards((prev) => [data, ...prev])
+      if (!error && data) {
+        setFlashcards((prev) => [data, ...prev])
+      } else if (error) {
+        console.error('Error saving flashcard:', error.message)
+      }
+    } catch (err) {
+      console.error('Save flashcard failed:', err)
     }
   }
 
   async function removeFlashcard(id: string) {
-    const { error } = await supabase.from('flashcards').delete().eq('id', id)
-    if (!error) {
-      setFlashcards((prev) => prev.filter((c) => c.id !== id))
+    try {
+      const { error } = await supabase.from('flashcards').delete().eq('id', id)
+      if (!error) {
+        setFlashcards((prev) => prev.filter((c) => c.id !== id))
+      }
+    } catch (err) {
+      console.error('Delete flashcard failed:', err)
     }
   }
 
