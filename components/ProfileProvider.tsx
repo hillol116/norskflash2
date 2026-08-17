@@ -1,147 +1,109 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import {
-  getActiveProfileName,
-  setActiveProfileName,
-  getProfileNames,
-  createProfile,
-  deleteProfile as deleteProfileStore,
-  getProfileGeminiKey,
-  setProfileGeminiKey,
-  getProfileFlashcards,
-  addProfileFlashcard,
-  deleteProfileFlashcard,
-  type StoredFlashcard,
-} from '@/lib/profiles'
+import React, { createContext, useContext, useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
-type ProfileContextValue = {
-  activeProfile: string
-  profiles: string[]
-  geminiKey: string
-  hasKey: boolean
-  ready: boolean
-  selectProfile: (name: string) => void
-  addProfile: (name: string) => void
-  removeProfile: (name: string) => void
-  saveKey: (key: string) => void
-  flashcards: StoredFlashcard[]
-  reloadFlashcards: () => void
-  saveFlashcard: (card: Omit<StoredFlashcard, 'id' | 'created_at'>) => void
-  removeFlashcard: (id: string) => void
+type Profile = { id: string; username: string }
+type Flashcard = {
+  id: string
+  norwegian_word: string
+  english_meaning: string
+  forms?: any
+  sentences?: any
+  nuances?: string
 }
 
-const ProfileContext = createContext<ProfileContextValue>({
-  activeProfile: '',
-  profiles: [],
-  geminiKey: '',
-  hasKey: false,
-  ready: false,
-  selectProfile: () => {},
-  addProfile: () => {},
-  removeProfile: () => {},
-  saveKey: () => {},
-  flashcards: [],
-  reloadFlashcards: () => {},
-  saveFlashcard: () => {},
-  removeFlashcard: () => {},
-})
+type ProfileContextType = {
+  activeProfile: Profile | null
+  ready: boolean
+  flashcards: Flashcard[]
+  selectOrCreateProfile: (username: string) => Promise<void>
+  saveFlashcard: (card: Omit<Flashcard, 'id'>) => Promise<void>
+  removeFlashcard: (id: string) => Promise<void>
+}
 
-export function ProfileProvider({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false)
-  const [activeProfile, setActiveProfile] = useState('')
-  const [profiles, setProfiles] = useState<string[]>([])
-  const [geminiKey, setGeminiKey] = useState('')
-  const [flashcards, setFlashcards] = useState<StoredFlashcard[]>([])
+const ProfileContext = createContext<ProfileContextType | undefined>(undefined)
 
-  function refresh() {
-    const names = getProfileNames()
-    setProfiles(names)
-    const active = getActiveProfileName()
-    setActiveProfile(active)
-    setGeminiKey(active ? getProfileGeminiKey(active) : '')
-    setFlashcards(active ? getProfileFlashcards(active) : [])
+export function ProfileProvider({ children }: { children: React.ReactNode }) {
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null)
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([])
+  const [ready, setReady] = useState(true)
+
+  async function loadFlashcards(profileId: string) {
+    const { data } = await supabase
+      .from('flashcards')
+      .select('*')
+      .eq('profile_id', profileId)
+      .order('created_at', { ascending: false })
+    if (data) setFlashcards(data)
   }
 
-  useEffect(() => {
-    refresh()
-    setReady(true)
-  }, [])
+  async function selectOrCreateProfile(username: string) {
+    const cleanName = username.trim().toLowerCase()
+    if (!cleanName) return
 
-  function selectProfile(name: string) {
-    setActiveProfileName(name)
-    setActiveProfile(name)
-    setGeminiKey(name ? getProfileGeminiKey(name) : '')
-    setFlashcards(name ? getProfileFlashcards(name) : [])
-  }
+    // Try fetching existing profile
+    let { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('username', cleanName)
+      .maybeSingle()
 
-  function addProfile(name: string) {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    createProfile(trimmed)
-    setActiveProfileName(trimmed)
-    setActiveProfile(trimmed)
-    setProfiles(getProfileNames())
-    setGeminiKey('')
-    setFlashcards([])
-  }
+    // If profile doesn't exist, create it
+    if (!profile) {
+      const { data: newProfile, error } = await supabase
+        .from('profiles')
+        .insert({ username: cleanName })
+        .select()
+        .single()
+      if (error) throw error
+      profile = newProfile
+    }
 
-  function removeProfile(name: string) {
-    deleteProfileStore(name)
-    const wasActive = activeProfile === name
-    setProfiles(getProfileNames())
-    if (wasActive) {
-      setActiveProfile('')
-      setActiveProfileName('')
-      setGeminiKey('')
-      setFlashcards([])
+    if (profile) {
+      setActiveProfile(profile)
+      await loadFlashcards(profile.id)
     }
   }
 
-  function saveKey(key: string) {
+  async function saveFlashcard(card: Omit<Flashcard, 'id'>) {
     if (!activeProfile) return
-    setProfileGeminiKey(activeProfile, key)
-    setGeminiKey(key.trim())
+    const { data, error } = await supabase
+      .from('flashcards')
+      .insert({ ...card, profile_id: activeProfile.id })
+      .select()
+      .single()
+
+    if (!error && data) {
+      setFlashcards((prev) => [data, ...prev])
+    }
   }
 
-  function reloadFlashcards() {
-    if (!activeProfile) return
-    setFlashcards(getProfileFlashcards(activeProfile))
-  }
-
-  function saveFlashcard(card: Omit<StoredFlashcard, 'id' | 'created_at'>) {
-    if (!activeProfile) return
-    addProfileFlashcard(activeProfile, card as Parameters<typeof addProfileFlashcard>[1])
-    setFlashcards(getProfileFlashcards(activeProfile))
-  }
-
-  function removeFlashcard(id: string) {
-    if (!activeProfile) return
-    deleteProfileFlashcard(activeProfile, id)
-    setFlashcards(getProfileFlashcards(activeProfile))
-  }
-
-  const value: ProfileContextValue = {
-    activeProfile,
-    profiles,
-    geminiKey,
-    hasKey: ready && geminiKey.length > 0,
-    ready,
-    selectProfile,
-    addProfile,
-    removeProfile,
-    saveKey,
-    flashcards,
-    reloadFlashcards,
-    saveFlashcard,
-    removeFlashcard,
+  async function removeFlashcard(id: string) {
+    const { error } = await supabase.from('flashcards').delete().eq('id', id)
+    if (!error) {
+      setFlashcards((prev) => prev.filter((c) => c.id !== id))
+    }
   }
 
   return (
-    <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>
+    <ProfileContext.Provider
+      value={{
+        activeProfile,
+        ready,
+        flashcards,
+        selectOrCreateProfile,
+        saveFlashcard,
+        removeFlashcard,
+      }}
+    >
+      {children}
+    </ProfileContext.Provider>
   )
 }
 
 export function useProfile() {
-  return useContext(ProfileContext)
+  const context = useContext(ProfileContext)
+  if (!context) throw new Error('useProfile must be used within ProfileProvider')
+  return context
 }
