@@ -9,35 +9,52 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const { activeProfile, getApiKey, setApiKey } = useProfile()
+  const profileContext = useProfile()
+  const activeProfile = profileContext?.activeProfile ?? ''
+  const getApiKey = profileContext?.getApiKey
+  const setApiKey = profileContext?.setApiKey
+
   const [keyInput, setKeyInput] = useState('')
 
   useEffect(() => {
-    if (open && activeProfile) {
-      setKeyInput(getApiKey(activeProfile) || '')
+    if (open && activeProfile && getApiKey) {
+      try {
+        const savedKey = getApiKey(activeProfile) || ''
+        setKeyInput(savedKey)
+      } catch (err) {
+        console.error('Error loading API key:', err)
+      }
     }
-  }, [open, activeProfile, getApiKey])
+  }, [open, activeProfile])
 
   if (!open) return null
 
   function handleSave() {
-    if (activeProfile) {
-      setApiKey(activeProfile, keyInput.trim())
+    if (activeProfile && setApiKey) {
+      try {
+        setApiKey(activeProfile, keyInput.trim())
+      } catch (err) {
+        console.error('Error saving API key:', err)
+      }
     }
-    onClose() // Closes modal after saving
+    onClose()
   }
 
   function handleRemove() {
-    if (activeProfile) {
-      setApiKey(activeProfile, '')
-      setKeyInput('')
+    if (activeProfile && setApiKey) {
+      try {
+        setApiKey(activeProfile, '')
+        setKeyInput('')
+      } catch (err) {
+        console.error('Error removing API key:', err)
+      }
     }
-    onClose() // Closes modal after removing
+    onClose()
   }
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div 
@@ -67,8 +84,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           />
           
           <p className="text-xs text-slate-500">
-            This key is saved for the &quot;{activeProfile}&quot; profile and stored only in this browser.
-            Get a key from{' '}
+            {activeProfile ? (
+              <>This key is saved for the &quot;{activeProfile}&quot; profile and stored only in this browser.</>
+            ) : (
+              <>Select or create a profile first to save an API key.</>
+            )}
+            {' '}Get a key from{' '}
             <a
               href="https://aistudio.google.com/"
               target="_blank"
@@ -84,7 +105,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         <div className="mt-6 flex items-center gap-2">
           <button
             onClick={handleSave}
-            className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+            disabled={!activeProfile}
+            className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
           >
             Save key
           </button>
@@ -92,7 +114,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           {keyInput && (
             <button
               onClick={handleRemove}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+              disabled={!activeProfile}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
             >
               Remove key
             </button>
