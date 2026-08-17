@@ -8,6 +8,11 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'NorskFlash — Norwegian-English Dictionary & Flashcards',
   description: 'Look up Norwegian words and study them with interactive flashcards.',
+  manifest: '/manifest.json',
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-512.png',
+  },
 }
 
 export default function RootLayout({
