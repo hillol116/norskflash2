@@ -42,6 +42,7 @@ export default function Home() {
     setError('')
     setResult(null)
     setSavedMessage('')
+
     try {
       const res = await fetch('/api/lookup', {
         method: 'POST',
@@ -51,10 +52,13 @@ export default function Home() {
         },
         body: JSON.stringify({ word: word.trim() }),
       })
+
       const data = await res.json()
+
       if (!res.ok) {
         throw new Error(data.error || 'Lookup failed.')
       }
+
       setResult(data as LookupResult)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lookup failed.')
@@ -82,7 +86,7 @@ export default function Home() {
 
   function handleDeleteCard(id: string) {
     removeFlashcard(id)
-    setCardIndex((i) => Math.min(i, Math.max(safeCards.length - 2, 0)))
+    setCardIndex((i) => Math.max(0, Math.min(i, safeCards.length - 2)))
   }
 
   function switchTab(next: Tab) {
@@ -209,7 +213,7 @@ export default function Home() {
                               {formEntries.map(([k, v]) => (
                                 <tr key={k} className="border-b border-slate-100 last:border-0">
                                   <td className="bg-slate-50 px-4 py-2.5 font-medium capitalize text-slate-600">
-                                    {k}
+                                    {k.replace('_', ' ')}
                                   </td>
                                   <td className="px-4 py-2.5 font-semibold text-slate-800">
                                     {v}
