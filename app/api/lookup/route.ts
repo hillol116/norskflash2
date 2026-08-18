@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,13 +14,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-      },
-    })
+    const ai = new GoogleGenAI({ apiKey })
 
     const prompt = `You are a precise Norwegian-English dictionary.
 Provide full details for the Norwegian word: "${word}".
@@ -41,15 +35,22 @@ Return ONLY raw valid JSON matching this schema (do NOT use markdown backticks):
   "nuances": "..."
 }`
 
-    const resultStream = await model.generateContentStream(prompt)
+    const responseStream = await ai.models.generateContentStream({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    })
 
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder()
-        for await (const chunk of resultStream.stream) {
-          const text = chunk.text()
-          const cleanedText = text.replace(/```json/g, '').replace(/```/g, '')
-          controller.enqueue(encoder.encode(cleanedText))
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+            const cleanedText = chunk.text.replace(/```json/g, '').replace(/```/g, '')
+            controller.enqueue(encoder.encode(cleanedText))
+          }
         }
         controller.close()
       },
