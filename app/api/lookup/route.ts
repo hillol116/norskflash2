@@ -1,29 +1,32 @@
-import { NextResponse } from 'next/server'
 import { GoogleGenAI, Type } from '@google/genai'
 
 export async function POST(request: Request) {
   try {
     const { word } = await request.json()
     const headerKey = request.headers.get('x-gemini-key')
-
     const apiKey = headerKey || process.env.GEMINI_API_KEY
 
     if (!apiKey) {
-      return NextResponse.json(
-        { error: 'No Gemini API key configured.' },
-        { status: 400 }
-      )
+      return new Response(JSON.stringify({ error: 'No API key configured.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     const ai = new GoogleGenAI({ apiKey })
 
-    const response = await ai.models.generateContent({
+    // Stream directly from Gemini 3.6 Flash
+    const responseStream = await ai.models.generateContentStream({
       model: 'gemini-3.6-flash',
-      contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only. Keep example sentences concise.`,
+      contents: `Provide Norwegian dictionary entry for: "${word}"`,
       config: {
+        systemInstruction: 'You are a precise dictionary database. Output pure JSON without meta-commentary, explanations, or thinking dialogue.',
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 1000, // Increased to prevent truncating the JSON payload
+        maxOutputTokens: 500,
+        thinkingConfig: {
+          thinkingBudget: 1024,
+        },
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -56,21 +59,26 @@ export async function POST(request: Request) {
       },
     })
 
-    const text = response.text || '{}'
+    // Create a ReadableStream so Next.js forwards chunks immediately
+    const encoder = new TextEncoder()
+    const readable = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+            controller.enqueue(encoder.encode(chunk.text))
+          }
+        }
+        controller.close()
+      },
+    })
 
-    try {
-      const parsed = JSON.parse(text)
-      return NextResponse.json(parsed)
-    } catch {
-      return NextResponse.json(
-        { error: 'Received invalid JSON response from AI. Please try again.' },
-        { status: 500 }
-      )
-    }
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+      },
+    })
   } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'Error processing request' },
-      { status: 500 }
-    )
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 })
   }
 }
