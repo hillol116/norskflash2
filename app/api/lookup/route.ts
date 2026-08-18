@@ -18,10 +18,44 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({ apiKey })
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: `Provide detailed Norwegian dictionary information for the word "${word}". Return response as JSON containing: norwegian_word, english_meaning, forms (object with grammatical forms), sentences (array of objects with norwegian and english keys), and nuances.`,
+      model: 'gemini-2.5-flash', // Fastest model optimized for structured JSON outputs
+      contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only.`,
       config: {
         responseMimeType: 'application/json',
+        temperature: 0.1, // Low temperature speeds up deterministic lookup generation
+        maxOutputTokens: 300, // Hard limit output length to avoid long generation times
+        thinkingConfig: {
+          thinkingBudget: 0, // Disables extended reasoning delays for quick lookups
+        },
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            norwegian_word: { type: 'STRING' },
+            english_meaning: { type: 'STRING' },
+            forms: {
+              type: 'OBJECT',
+              properties: {
+                singular_indefinite: { type: 'STRING' },
+                singular_definite: { type: 'STRING' },
+                plural_indefinite: { type: 'STRING' },
+                plural_definite: { type: 'STRING' },
+              },
+            },
+            sentences: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  norwegian: { type: 'STRING' },
+                  english: { type: 'STRING' },
+                },
+                required: ['norwegian', 'english'],
+              },
+            },
+            nuances: { type: 'STRING' },
+          },
+          required: ['norwegian_word', 'english_meaning'],
+        },
       },
     })
 
