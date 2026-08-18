@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({ apiKey })
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Fastest model optimized for structured JSON outputs
+      model: 'gemini-3.6-flash', // Fastest model optimized for structured JSON outputs
       contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only.`,
       config: {
         responseMimeType: 'application/json',
