@@ -13,8 +13,7 @@ export default function Home() {
     activeProfile,
     ready,
     geminiKey,
-    hasKey,
-    flashcards,
+    flashcards = [],
     saveFlashcard,
     removeFlashcard,
   } = useProfile()
@@ -26,6 +25,9 @@ export default function Home() {
   const [result, setResult] = useState<LookupResult | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
   const [cardIndex, setCardIndex] = useState(0)
+
+  // Safe fallback array for flashcards
+  const safeCards = flashcards || []
 
   async function handleLookup(e: React.FormEvent) {
     e.preventDefault()
@@ -80,7 +82,7 @@ export default function Home() {
 
   function handleDeleteCard(id: string) {
     removeFlashcard(id)
-    setCardIndex((i) => Math.min(i, Math.max(flashcards.length - 2, 0)))
+    setCardIndex((i) => Math.min(i, Math.max(safeCards.length - 2, 0)))
   }
 
   function switchTab(next: Tab) {
@@ -92,6 +94,7 @@ export default function Home() {
 
   const forms = result?.forms ?? {}
   const formEntries = Object.entries(forms).filter(([, v]) => v)
+  const sentences = result?.sentences ?? []
 
   if (!ready) {
     return (
@@ -219,13 +222,13 @@ export default function Home() {
                       </div>
                     )}
 
-                    {result.sentences.length > 0 && (
+                    {sentences.length > 0 && (
                       <div>
                         <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-500">
                           Example sentences
                         </h3>
                         <ul className="space-y-3">
-                          {result.sentences.map((s, i) => (
+                          {sentences.map((s, i) => (
                             <li
                               key={i}
                               className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3"
@@ -277,19 +280,19 @@ export default function Home() {
 
             {tab === 'flashcards' && (
               <section>
-                {flashcards.length === 0 && (
+                {safeCards.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 px-6 py-16 text-center text-slate-500">
                     You have no flashcards yet. Look up a word in the Dictionary tab and
                     save it to build your deck.
                   </div>
                 )}
 
-                {flashcards.length > 0 && (
+                {safeCards.length > 0 && (
                   <FlashcardView
-                    card={flashcards[cardIndex]}
+                    card={safeCards[cardIndex]}
                     index={cardIndex}
-                    total={flashcards.length}
-                    onNext={() => setCardIndex((i) => Math.min(i + 1, flashcards.length - 1))}
+                    total={safeCards.length}
+                    onNext={() => setCardIndex((i) => Math.min(i + 1, safeCards.length - 1))}
                     onPrev={() => setCardIndex((i) => Math.max(i - 1, 0))}
                     onDelete={handleDeleteCard}
                   />
