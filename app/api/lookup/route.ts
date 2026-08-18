@@ -19,11 +19,11 @@ export async function POST(request: Request) {
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only.`,
+      contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only. Keep example sentences concise.`,
       config: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 500,
+        maxOutputTokens: 1000, // Increased to prevent truncating the JSON payload
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -57,9 +57,16 @@ export async function POST(request: Request) {
     })
 
     const text = response.text || '{}'
-    const parsed = JSON.parse(text)
 
-    return NextResponse.json(parsed)
+    try {
+      const parsed = JSON.parse(text)
+      return NextResponse.json(parsed)
+    } catch {
+      return NextResponse.json(
+        { error: 'Received invalid JSON response from AI. Please try again.' },
+        { status: 500 }
+      )
+    }
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || 'Error processing request' },
