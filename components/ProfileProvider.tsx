@@ -26,6 +26,7 @@ const ProfileContext = createContext<ProfileContextType | undefined>(undefined)
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null)
+  // Guarantees flashcards is always an array [], never undefined
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
   const [ready] = useState(true)
 
@@ -41,9 +42,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         console.error('Error loading flashcards:', error.message)
         return
       }
-      if (data) setFlashcards(data)
+      setFlashcards(data || [])
     } catch (err) {
       console.error('Failed to load flashcards:', err)
+      setFlashcards([])
     }
   }
 
@@ -52,7 +54,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     if (!cleanName) return
 
     try {
-      // 1. Try fetching existing profile
       let { data: profile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
@@ -63,7 +64,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         console.error('Error fetching profile:', fetchError.message)
       }
 
-      // 2. If profile doesn't exist, create it
       if (!profile) {
         const { data: newProfile, error: insertError } = await supabase
           .from('profiles')
