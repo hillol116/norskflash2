@@ -1,84 +1,70 @@
-import { GoogleGenAI, Type } from '@google/genai'
+import { NextRequest, NextResponse } from 'next/server'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { word } = await request.json()
-    const headerKey = request.headers.get('x-gemini-key')
-    const apiKey = headerKey || process.env.GEMINI_API_KEY
+    const { word } = await req.json()
+    const customKey = req.headers.get('x-gemini-key')
+    const apiKey = customKey || process.env.GEMINI_API_KEY
 
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'No API key configured.' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return NextResponse.json(
+        { error: 'Gemini API key is missing.' },
+        { status: 400 }
+      )
     }
 
-    const ai = new GoogleGenAI({ apiKey })
-
-    // Stream directly from Gemini 3.6 Flash
-    const responseStream = await ai.models.generateContentStream({
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({
       model: 'gemini-3.6-flash',
-      contents: `Provide Norwegian dictionary entry for: "${word}"`,
-      config: {
-        systemInstruction: 'You are a precise dictionary database. Output pure JSON without meta-commentary, explanations, or thinking dialogue.',
+      generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.1,
-        maxOutputTokens: 500,
-        thinkingConfig: {
-          thinkingBudget: 1024,
-        },
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            norwegian_word: { type: Type.STRING },
-            english_meaning: { type: Type.STRING },
-            forms: {
-              type: Type.OBJECT,
-              properties: {
-                singular_indefinite: { type: Type.STRING },
-                singular_definite: { type: Type.STRING },
-                plural_indefinite: { type: Type.STRING },
-                plural_definite: { type: Type.STRING },
-              },
-            },
-            sentences: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  norwegian: { type: Type.STRING },
-                  english: { type: Type.STRING },
-                },
-                required: ['norwegian', 'english'],
-              },
-            },
-            nuances: { type: Type.STRING },
-          },
-          required: ['norwegian_word', 'english_meaning'],
-        },
       },
     })
 
-    // Create a ReadableStream so Next.js forwards chunks immediately
-    const encoder = new TextEncoder()
-    const readable = new ReadableStream({
+    const prompt = `You are a precise Norwegian-English dictionary.
+Provide full details for the Norwegian word: "${word}".
+
+Return ONLY raw valid JSON matching this schema (do NOT use markdown backticks):
+{
+  "norwegian_word": "word",
+  "english_meaning": "translation",
+  "forms": {
+    "indefinite_singular": "...",
+    "definite_singular": "...",
+    "indefinite_plural": "...",
+    "definite_plural": "..."
+  },
+  "sentences": [
+    { "norwegian": "...", "english": "..." }
+  ],
+  "nuances": "..."
+}`
+
+    const resultStream = await model.generateContentStream(prompt)
+
+    const stream = new ReadableStream({
       async start(controller) {
-        for await (const chunk of responseStream) {
-          if (chunk.text) {
-            controller.enqueue(encoder.encode(chunk.text))
-          }
+        const encoder = new TextEncoder()
+        for await (const chunk of resultStream.stream) {
+          const text = chunk.text()
+          const cleanedText = text.replace(/```json/g, '').replace(/```/g, '')
+          controller.enqueue(encoder.encode(cleanedText))
         }
         controller.close()
       },
     })
 
-    return new Response(readable, {
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
       },
     })
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  } catch (err) {
+    console.error(err)
+    return NextResponse.json(
+      { error: 'Failed to look up word.' },
+      { status: 500 }
+    )
   }
 }
