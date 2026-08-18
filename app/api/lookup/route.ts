@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, Type } from '@google/genai'
 
 export async function POST(request: Request) {
   try {
@@ -18,41 +18,38 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({ apiKey })
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash', // Fastest model optimized for structured JSON outputs
+      model: 'gemini-3.6-flash',
       contents: `Provide Norwegian dictionary information for: "${word}". Return strict JSON only.`,
       config: {
         responseMimeType: 'application/json',
-        temperature: 0.1, // Low temperature speeds up deterministic lookup generation
-        maxOutputTokens: 300, // Hard limit output length to avoid long generation times
-        thinkingConfig: {
-          thinkingBudget: 0, // Disables extended reasoning delays for quick lookups
-        },
+        temperature: 0.1,
+        maxOutputTokens: 500,
         responseSchema: {
-          type: 'OBJECT',
+          type: Type.OBJECT,
           properties: {
-            norwegian_word: { type: 'STRING' },
-            english_meaning: { type: 'STRING' },
+            norwegian_word: { type: Type.STRING },
+            english_meaning: { type: Type.STRING },
             forms: {
-              type: 'OBJECT',
+              type: Type.OBJECT,
               properties: {
-                singular_indefinite: { type: 'STRING' },
-                singular_definite: { type: 'STRING' },
-                plural_indefinite: { type: 'STRING' },
-                plural_definite: { type: 'STRING' },
+                singular_indefinite: { type: Type.STRING },
+                singular_definite: { type: Type.STRING },
+                plural_indefinite: { type: Type.STRING },
+                plural_definite: { type: Type.STRING },
               },
             },
             sentences: {
-              type: 'ARRAY',
+              type: Type.ARRAY,
               items: {
-                type: 'OBJECT',
+                type: Type.OBJECT,
                 properties: {
-                  norwegian: { type: 'STRING' },
-                  english: { type: 'STRING' },
+                  norwegian: { type: Type.STRING },
+                  english: { type: Type.STRING },
                 },
                 required: ['norwegian', 'english'],
               },
             },
-            nuances: { type: 'STRING' },
+            nuances: { type: Type.STRING },
           },
           required: ['norwegian_word', 'english_meaning'],
         },
