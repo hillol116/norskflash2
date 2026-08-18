@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { parse } from 'best-effort-json-parser'
 import { useProfile } from '@/components/ProfileProvider'
 import type { LookupResult } from '@/lib/types'
 import FlashcardView from '@/components/FlashcardView'
@@ -22,21 +23,15 @@ export default function Home() {
   const [word, setWord] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<LookupResult | null>(null)
+  const [result, setResult] = useState<Partial<LookupResult> | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
   const [cardIndex, setCardIndex] = useState(0)
 
-  // Safe fallback array for flashcards
   const safeCards = flashcards || []
 
   async function handleLookup(e: React.FormEvent) {
     e.preventDefault()
     if (!word.trim()) return
-
-    if (!activeProfile) {
-      setError('Please select or create a profile first.')
-      return
-    }
 
     setLoading(true)
     setError('')
@@ -53,13 +48,27 @@ export default function Home() {
         body: JSON.stringify({ word: word.trim() }),
       })
 
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Lookup failed.')
+      if (!res.ok || !res.body) {
+        throw new Error('Lookup failed.')
       }
 
-      setResult(data as LookupResult)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        accumulatedText += decoder.decode(value, { stream: true })
+
+        try {
+          const partialParsed = parse(accumulatedText) as Partial<LookupResult>
+          setResult(partialParsed)
+        } catch {
+          // Ignore parsing anomalies during stream chunks
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lookup failed.')
     } finally {
@@ -68,7 +77,7 @@ export default function Home() {
   }
 
   function handleSave() {
-    if (!result || !activeProfile) return
+    if (!result?.norwegian_word || !result?.english_meaning || !activeProfile) return
     setSavedMessage('')
     try {
       saveFlashcard({
@@ -126,13 +135,11 @@ export default function Home() {
               Create a profile to get started
             </h2>
             <p className="mb-6 text-slate-600">
-              Use the profile menu in the top-right corner to create a profile. Each
-              profile keeps its own flashcard deck.
+              Use the profile menu in the top-right corner to create a profile.
             </p>
           </section>
         ) : (
           <>
-            {/* Tabs */}
             <div className="mb-8 flex justify-center">
               <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
                 <button
@@ -185,20 +192,20 @@ export default function Home() {
                   </div>
                 )}
 
-                {loading && (
+                {loading && !result && (
                   <div className="flex items-center justify-center py-16">
                     <div className="h-10 w-10 animate-spin rounded-full border-4 border-sky-200 border-t-sky-600" />
                   </div>
                 )}
 
-                {result && !loading && (
+                {result && (
                   <article className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                     <div>
                       <h2 className="text-3xl font-bold text-slate-900">
-                        {result.norwegian_word}
+                        {result.norwegian_word || '...'}
                       </h2>
                       <p className="mt-1 text-xl text-sky-700">
-                        {result.english_meaning}
+                        {result.english_meaning || ''}
                       </p>
                     </div>
 
@@ -237,8 +244,8 @@ export default function Home() {
                               key={i}
                               className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3"
                             >
-                              <p className="font-medium text-slate-900">{s.norwegian}</p>
-                              <p className="mt-1 text-sm text-slate-600">{s.english}</p>
+                              <p className="font-medium text-slate-900">{s?.norwegian}</p>
+                              <p className="mt-1 text-sm text-slate-600">{s?.english}</p>
                             </li>
                           ))}
                         </ul>
@@ -255,7 +262,8 @@ export default function Home() {
                     <div className="flex items-center gap-4 pt-2">
                       <button
                         onClick={handleSave}
-                        className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+                        disabled={loading}
+                        className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
                       >
                         Save Flashcard
                       </button>
