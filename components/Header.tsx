@@ -1,10 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import SettingsModal from '@/components/SettingsModal'
 import { useProfile } from '@/components/ProfileProvider'
 
 export default function Header() {
   const { activeProfile, selectOrCreateProfile } = useProfile()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [error, setError] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [usernameInput, setUsernameInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,13 +16,14 @@ export default function Header() {
     e.preventDefault()
     if (!usernameInput.trim()) return
 
+    setError('')
     setLoading(true)
     try {
       await selectOrCreateProfile(usernameInput.trim())
       setUsernameInput('')
       setIsOpen(false)
     } catch (err) {
-      console.error('Failed to select or create profile:', err)
+      setError(err instanceof Error ? err.message : 'Could not select profile. Check the database connection and permissions.')
     } finally {
       setLoading(false)
     }
@@ -33,6 +37,7 @@ export default function Header() {
         </div>
 
         <div className="relative">
+          {activeProfile && <button type="button" onClick={() => setSettingsOpen(true)} className="mr-3 text-sm font-medium text-sky-700">API key</button>}
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
@@ -67,6 +72,7 @@ export default function Header() {
                 Switch or Create Profile
               </h3>
               
+              {error && <p role="alert" className="mb-3 text-sm text-rose-600">{error}</p>}
               <form onSubmit={handleProfileSubmit} className="space-y-3">
                 <input
                   type="text"
@@ -88,6 +94,7 @@ export default function Header() {
           )}
         </div>
       </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )
 }

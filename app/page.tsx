@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { parse } from 'best-effort-json-parser'
 import { useProfile } from '@/components/ProfileProvider'
 import type { LookupResult } from '@/lib/types'
 import FlashcardView from '@/components/FlashcardView'
 import Header from '@/components/Header'
+import Review from '@/components/Review'
 
-type Tab = 'dictionary' | 'flashcards'
+type Tab = 'dictionary' | 'review' | 'cards'
 
 export default function Home() {
   const {
@@ -17,6 +18,7 @@ export default function Home() {
     flashcards = [],
     saveFlashcard,
     removeFlashcard,
+    loadFlashcards,
   } = useProfile()
 
   const [tab, setTab] = useState<Tab>('dictionary')
@@ -25,9 +27,23 @@ export default function Home() {
   const [error, setError] = useState('')
   const [result, setResult] = useState<Partial<LookupResult> | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [cardsLoading, setCardsLoading] = useState(false)
+  const [cardsError, setCardsError] = useState('')
   const [cardIndex, setCardIndex] = useState(0)
 
-  const safeCards = flashcards || []
+  const safeCards = flashcards
+  const visibleIndex = Math.min(cardIndex, Math.max(0, safeCards.length - 1))
+  useEffect(() => { setCardIndex(0); setResult(null); setSavedMessage('') }, [activeProfile?.id])
+  useEffect(() => {
+    if (tab !== 'cards' || !activeProfile) return
+    let cancelled = false
+    setCardsLoading(true)
+    setCardsError('')
+    loadFlashcards().catch(() => { if (!cancelled) setCardsError('Could not load cards. Check your connection and Supabase migration, then reopen All Cards.') })
+      .finally(() => { if (!cancelled) setCardsLoading(false) })
+    return () => { cancelled = true }
+  }, [tab, activeProfile?.id, loadFlashcards])
 
   async function handleLookup(e: React.FormEvent) {
     e.preventDefault()
@@ -76,33 +92,35 @@ export default function Home() {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!result?.norwegian_word || !result?.english_meaning || !activeProfile) return
     setSavedMessage('')
+    setSaving(true)
     try {
-      saveFlashcard({
+      await saveFlashcard({
         norwegian_word: result.norwegian_word,
         english_meaning: result.english_meaning,
-        forms: result.forms,
-        sentences: result.sentences,
-        nuances: result.nuances,
+        forms: result.forms ?? {},
+        sentences: result.sentences ?? [],
+        nuances: result.nuances ?? '',
       })
       setSavedMessage('Saved to your flashcards!')
     } catch {
-      setSavedMessage('Could not save the flashcard.')
-    }
+      setSavedMessage('Could not save the flashcard. Check your connection and Supabase migration.')
+    } finally { setSaving(false) }
   }
 
-  function handleDeleteCard(id: string) {
-    removeFlashcard(id)
-    setCardIndex((i) => Math.max(0, Math.min(i, safeCards.length - 2)))
+  async function handleDeleteCard(id: string) {
+    setCardsError('')
+    try {
+      await removeFlashcard(id)
+      setCardIndex(i => Math.max(0, Math.min(i, safeCards.length - 2)))
+    } catch { setCardsError('Could not delete this card. Refresh and try again.') }
   }
 
   function switchTab(next: Tab) {
     setTab(next)
-    if (next === 'flashcards') {
-      setCardIndex(0)
-    }
+    setCardIndex(0)
   }
 
   const forms = result?.forms ?? {}
@@ -152,15 +170,19 @@ export default function Home() {
                 >
                   Dictionary
                 </button>
+                <button onClick={() => switchTab('review')}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium ${tab === 'review' ? 'bg-sky-600 text-white shadow' : 'text-slate-600'}`}>
+                  Review
+                </button>
                 <button
-                  onClick={() => switchTab('flashcards')}
+                  onClick={() => switchTab('cards')}
                   className={`rounded-lg px-6 py-2 text-sm font-medium transition ${
-                    tab === 'flashcards'
+                    tab === 'cards'
                       ? 'bg-sky-600 text-white shadow'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Flashcards
+                  All Cards
                 </button>
               </div>
             </div>
@@ -262,10 +284,10 @@ export default function Home() {
                     <div className="flex items-center gap-4 pt-2">
                       <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={loading || saving}
                         className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
                       >
-                        Save Flashcard
+                        {saving ? 'Saving…' : 'Save Flashcard'}
                       </button>
                       {savedMessage && (
                         <span
@@ -290,19 +312,24 @@ export default function Home() {
               </section>
             )}
 
-            {tab === 'flashcards' && (
+            {tab === 'review' && <Review key={activeProfile.id} />}
+
+            {tab === 'cards' && (
               <section>
-                {safeCards.length === 0 && (
+                {cardsError && <p role="alert" className="mb-4 text-rose-600">{cardsError}</p>}
+                {cardsLoading && <p role="status">Loading cards…</p>}
+                {!cardsLoading && !cardsError && safeCards.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-white/50 px-6 py-16 text-center text-slate-500">
                     You have no flashcards yet. Look up a word in the Dictionary tab and
                     save it to build your deck.
                   </div>
                 )}
 
-                {safeCards.length > 0 && (
+                {!cardsLoading && safeCards.length > 0 && (
                   <FlashcardView
-                    card={safeCards[cardIndex]}
-                    index={cardIndex}
+                    key={safeCards[visibleIndex].id}
+                    card={safeCards[visibleIndex]}
+                    index={visibleIndex}
                     total={safeCards.length}
                     onNext={() => setCardIndex((i) => Math.min(i + 1, safeCards.length - 1))}
                     onPrev={() => setCardIndex((i) => Math.max(i - 1, 0))}
