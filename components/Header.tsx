@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import SettingsModal from '@/components/SettingsModal'
+import { supabaseConfigurationError } from '@/lib/supabase'
 import { useProfile } from '@/components/ProfileProvider'
 
 export default function Header() {
@@ -17,13 +18,23 @@ export default function Header() {
     if (!usernameInput.trim()) return
 
     setError('')
+    if (supabaseConfigurationError) {
+      setError(supabaseConfigurationError)
+      return
+    }
     setLoading(true)
     try {
       await selectOrCreateProfile(usernameInput.trim())
       setUsernameInput('')
       setIsOpen(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not select profile. Check the database connection and permissions.')
+      // PostgREST errors are often plain objects, not Error instances.
+      const detail = err && typeof err === 'object' ? err as { message?: unknown; code?: unknown } : null
+      const message = typeof detail?.message === 'string' && detail.message.trim()
+        ? detail.message
+        : 'Could not connect to Supabase. Check your connection and the deployment settings.'
+      const code = typeof detail?.code === 'string' && detail.code ? ` [${detail.code}]` : ''
+      setError(`Profile request failed${code}: ${message}`)
     } finally {
       setLoading(false)
     }
