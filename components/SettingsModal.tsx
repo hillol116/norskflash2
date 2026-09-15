@@ -9,48 +9,22 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const profileContext = useProfile()
-  const activeProfile = profileContext?.activeProfile ?? ''
-  const getApiKey = profileContext?.getApiKey
-  const setApiKey = profileContext?.setApiKey
-
+  const { activeProfile, geminiKey, saveKey } = useProfile()
   const [keyInput, setKeyInput] = useState('')
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    if (open && activeProfile && getApiKey) {
-      try {
-        const savedKey = getApiKey(activeProfile) || ''
-        setKeyInput(savedKey)
-      } catch (err) {
-        console.error('Error loading API key:', err)
-      }
-    }
-  }, [open, activeProfile])
+    if (open) { setKeyInput(geminiKey); setError('') }
+  }, [open, activeProfile?.id, geminiKey])
 
   if (!open) return null
 
-  function handleSave() {
-    if (activeProfile && setApiKey) {
-      try {
-        setApiKey(activeProfile, keyInput.trim())
-      } catch (err) {
-        console.error('Error saving API key:', err)
-      }
-    }
-    onClose()
+  function persistKey(value: string) {
+    try { saveKey(value); onClose() }
+    catch { setError('Could not save the key in this browser. Check browser storage settings.') }
   }
-
-  function handleRemove() {
-    if (activeProfile && setApiKey) {
-      try {
-        setApiKey(activeProfile, '')
-        setKeyInput('')
-      } catch (err) {
-        console.error('Error removing API key:', err)
-      }
-    }
-    onClose()
-  }
+  function handleSave() { persistKey(keyInput.trim()) }
+  function handleRemove() { persistKey('') }
 
   return (
     <div 
@@ -75,6 +49,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         <h2 className="text-lg font-semibold text-slate-900">Gemini API Key</h2>
         
         <div className="mt-4 space-y-3">
+          {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
           <input
             type="password"
             value={keyInput}
@@ -85,7 +60,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           
           <p className="text-xs text-slate-500">
             {activeProfile ? (
-              <>This key is saved for the &quot;{activeProfile}&quot; profile and stored only in this browser.</>
+              <>This key is saved for the &quot;{activeProfile.username}&quot; profile and stored only in this browser.</>
             ) : (
               <>Select or create a profile first to save an API key.</>
             )}

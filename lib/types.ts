@@ -1,16 +1,8 @@
-export type WordForms = {
-  infinitive?: string
-  present?: string
-  past?: string
-  perfect?: string
-  plural?: string
-}
+import type { SchedulingFields } from './fsrs'
 
-export type ExampleSentence = {
-  norwegian: string
-  english: string
-}
-
+// Gemini returns different grammatical keys for nouns, verbs and adjectives.
+export type WordForms = Record<string, string>
+export type ExampleSentence = { norwegian: string; english: string }
 export type LookupResult = {
   norwegian_word: string
   english_meaning: string
@@ -18,13 +10,11 @@ export type LookupResult = {
   sentences: ExampleSentence[]
   nuances: string
 }
-
-export type Flashcard = {
+export type Flashcard = LookupResult & SchedulingFields & {
   id: string
-  norwegian_word: string
-  english_meaning: string
-  forms: Record<string, string>
-  sentences: { norwegian: string; english: string }[]
-  nuances: string
+  profile_id: string | null
+  // Legacy Auth ownership is retained, never reinterpreted as a profile ID.
+  user_id?: string | null
   created_at: string
+  review_version: number
 }
