@@ -18,6 +18,7 @@ type ProfileContextType = {
   selectOrCreateProfile: (username: string) => Promise<void>
   loadFlashcards: () => Promise<void>
   loadDueCards: () => Promise<void>
+  findSavedWord: (word: string) => Promise<LookupResult | null>
   saveFlashcard: (card: LookupResult) => Promise<void>
   removeFlashcard: (id: string) => Promise<void>
   reviewCard: (card: Flashcard, grade: Grade) => Promise<void>
@@ -101,9 +102,51 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  async function matchingCards(word: string): Promise<Flashcard[]> {
+    const profile = profileRef.current
+    if (!profile) throw new Error('Select a profile first.')
+    // Escape LIKE wildcards so a word is matched literally, within this profile.
+    const pattern = word.trim().replace(/[\\%_*]/g, '\\$&')
+    const { data, error } = await supabase.from('flashcards').select('*')
+      .eq('profile_id', profile.id).ilike('norwegian_word', pattern).limit(100)
+    if (error) throw error
+    if (profileRef.current?.id !== profile.id) throw new Error('Profile changed during lookup. Please try again.')
+    return (data as Flashcard[]).filter(card =>
+      card.norwegian_word.trim().toLocaleLowerCase('nb-NO') === word.trim().toLocaleLowerCase('nb-NO'))
+  }
+
+  function complete(card: Flashcard): boolean {
+    return !!card.norwegian_word?.trim() && !!card.english_meaning?.trim() &&
+      !!card.forms && Object.values(card.forms).some(value => typeof value === 'string' && !!value.trim()) &&
+      Array.isArray(card.sentences) && card.sentences.some(sentence =>
+        !!sentence?.norwegian?.trim() && !!sentence?.english?.trim()) &&
+      typeof card.nuances === 'string'
+  }
+
+  async function findSavedWord(word: string): Promise<LookupResult | null> {
+    const card = (await matchingCards(word)).find(complete)
+    if (!card) return null
+    return { norwegian_word: card.norwegian_word, english_meaning: card.english_meaning,
+      forms: card.forms, sentences: card.sentences, nuances: card.nuances }
+  }
+
   async function saveFlashcard(card: LookupResult) {
     const profile = profileRef.current
     if (!profile) throw new Error('Select a profile first.')
+    const existing = (await matchingCards(card.norwegian_word))[0]
+    if (profileRef.current?.id !== profile.id) throw new Error('Profile changed while saving.')
+    if (existing) {
+      if (complete(existing)) return
+      // Fill an incomplete saved entry without resetting its review schedule.
+      const { data, error } = await supabase.from('flashcards').update(card)
+        .eq('id', existing.id).eq('profile_id', profile.id).select('*').single()
+      if (error) throw error
+      if (profileRef.current?.id === profile.id) {
+        ++allRequest.current
+        setFlashcards(previous => previous.map(item => item.id === existing.id ? data as Flashcard : item))
+      }
+      return
+    }
     const { data, error } = await supabase.from('flashcards')
       .insert({ ...card, ...newSchedulingFields(), profile_id: profile.id })
       .select('*').single()
@@ -157,7 +200,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
 
   return <ProfileContext.Provider value={{ activeProfile, ready: true, geminiKey, saveKey,
     flashcards, dueCards, selectOrCreateProfile, loadFlashcards, loadDueCards,
-    saveFlashcard, removeFlashcard, reviewCard }}>{children}</ProfileContext.Provider>
+    findSavedWord, saveFlashcard, removeFlashcard, reviewCard }}>{children}</ProfileContext.Provider>
 }
 
 export function useProfile() {

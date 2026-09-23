@@ -38,37 +38,37 @@ Return ONLY raw valid JSON matching this schema (do NOT use markdown backticks):
   "nuances": "..."
 }`
 
-    const responseStream = await ai.models.generateContentStream({
-      model: 'gemini-3.6-flash',
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash-lite',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
       },
     })
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder()
-        for await (const chunk of responseStream) {
-          if (chunk.text) {
-            const cleanedText = chunk.text.replace(/```json/g, '').replace(/```/g, '')
-            controller.enqueue(encoder.encode(cleanedText))
-          }
-        }
-        controller.close()
-      },
-    })
-
-    return new Response(stream, {
+    if (!response.text) throw new Error('Gemini returned an empty dictionary result.')
+    return new Response(response.text.replace(/```json/g, '').replace(/```/g, ''), {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
       },
     })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(err)
+    const upstream = err as { status?: number | string; code?: number; message?: string }
+    const details = upstream?.message ?? ''
+    const isRateLimited = upstream?.status === 429 || upstream?.code === 429 ||
+      /\b(429|RESOURCE_EXHAUSTED)\b/i.test(details)
+    if (isRateLimited) {
+      return NextResponse.json({ error: 'Gemini rate limit reached. Please wait and try again; if your daily free quota is exhausted, try again tomorrow.' }, { status: 429 })
+    }
+    const status = typeof upstream?.status === 'number' ? upstream.status : upstream?.code
+    const safeStatus = status === 400 || status === 401 || status === 403 || status === 404 || status === 503 ? status : 502
     return NextResponse.json(
-      { error: err.message || 'Failed to look up word.' },
-      { status: 500 }
+      { error: safeStatus === 401 || safeStatus === 403 ? 'Gemini rejected the API key. Check the key in Settings.'
+        : safeStatus === 404 ? 'Gemini model unavailable for this API key.'
+        : safeStatus === 400 ? 'Gemini could not process this lookup. Try another word.'
+        : 'Gemini lookup is temporarily unavailable. Please try again.' },
+      { status: safeStatus }
     )
   }
 }
