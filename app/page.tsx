@@ -19,6 +19,7 @@ export default function Home() {
     saveFlashcard,
     removeFlashcard,
     loadFlashcards,
+    findSavedWord,
   } = useProfile()
 
   const [tab, setTab] = useState<Tab>('dictionary')
@@ -26,6 +27,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<Partial<LookupResult> | null>(null)
+  const [fromSavedCard, setFromSavedCard] = useState(false)
   const [savedMessage, setSavedMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [cardsLoading, setCardsLoading] = useState(false)
@@ -52,9 +54,16 @@ export default function Home() {
     setLoading(true)
     setError('')
     setResult(null)
+    setFromSavedCard(false)
     setSavedMessage('')
 
     try {
+      const saved = await findSavedWord(word.trim())
+      if (saved) {
+        setResult(saved)
+        setFromSavedCard(true)
+        return
+      }
       const res = await fetch('/api/lookup', {
         method: 'POST',
         headers: {
@@ -65,7 +74,8 @@ export default function Home() {
       })
 
       if (!res.ok || !res.body) {
-        throw new Error('Lookup failed.')
+        const body = await res.json().catch(() => null)
+        throw new Error(typeof body?.error === 'string' ? body.error : 'Lookup failed. Please try again.')
       }
 
       const reader = res.body.getReader()
@@ -85,7 +95,17 @@ export default function Home() {
           // Ignore parsing anomalies during stream chunks
         }
       }
+      accumulatedText += decoder.decode()
+      let parsed: LookupResult
+      try { parsed = JSON.parse(accumulatedText) as LookupResult }
+      catch { throw new Error('Gemini returned an invalid dictionary result. Please try again.') }
+      if (!parsed.norwegian_word || !parsed.english_meaning || !parsed.forms ||
+          !Array.isArray(parsed.sentences) || typeof parsed.nuances !== 'string') {
+        throw new Error('Gemini returned an incomplete dictionary result. Please try again.')
+      }
+      setResult(parsed)
     } catch (err) {
+      setResult(null)
       setError(err instanceof Error ? err.message : 'Lookup failed.')
     } finally {
       setLoading(false)
@@ -104,7 +124,8 @@ export default function Home() {
         sentences: result.sentences ?? [],
         nuances: result.nuances ?? '',
       })
-      setSavedMessage('Saved to your flashcards!')
+      setFromSavedCard(true)
+      setSavedMessage(fromSavedCard ? 'Already saved in your flashcards.' : 'Saved to your flashcards!')
     } catch {
       setSavedMessage('Could not save the flashcard. Check your connection and Supabase migration.')
     } finally { setSaving(false) }
@@ -284,10 +305,10 @@ export default function Home() {
                     <div className="flex items-center gap-4 pt-2">
                       <button
                         onClick={handleSave}
-                        disabled={loading || saving}
+                        disabled={loading || saving || fromSavedCard}
                         className="rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
                       >
-                        {saving ? 'Saving…' : 'Save Flashcard'}
+                        {saving ? 'Saving…' : fromSavedCard ? 'Already Saved' : 'Save Flashcard'}
                       </button>
                       {savedMessage && (
                         <span
