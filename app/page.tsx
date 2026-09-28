@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { parse } from 'best-effort-json-parser'
 import { useProfile } from '@/components/ProfileProvider'
 import type { LookupResult } from '@/lib/types'
+import { lookupSavedFirst } from '@/lib/lookupSavedFirst'
 import FlashcardView from '@/components/FlashcardView'
 import Header from '@/components/Header'
 import Review from '@/components/Review'
@@ -58,52 +59,50 @@ export default function Home() {
     setSavedMessage('')
 
     try {
-      const saved = await findSavedWord(word.trim())
-      if (saved) {
-        setResult(saved)
-        setFromSavedCard(true)
-        return
-      }
-      const res = await fetch('/api/lookup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-gemini-key': geminiKey || '',
-        },
-        body: JSON.stringify({ word: word.trim() }),
-      })
+      const lookup = await lookupSavedFirst(word.trim(), findSavedWord, async () => {
+        const res = await fetch('/api/lookup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-gemini-key': geminiKey || '',
+          },
+          body: JSON.stringify({ word: word.trim() }),
+        })
 
-      if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => null)
-        throw new Error(typeof body?.error === 'string' ? body.error : 'Lookup failed. Please try again.')
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let accumulatedText = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        accumulatedText += decoder.decode(value, { stream: true })
-
-        try {
-          const partialParsed = parse(accumulatedText) as Partial<LookupResult>
-          setResult(partialParsed)
-        } catch {
-          // Ignore parsing anomalies during stream chunks
+        if (!res.ok || !res.body) {
+          const body = await res.json().catch(() => null)
+          throw new Error(typeof body?.error === 'string' ? body.error : 'Lookup failed. Please try again.')
         }
-      }
-      accumulatedText += decoder.decode()
-      let parsed: LookupResult
-      try { parsed = JSON.parse(accumulatedText) as LookupResult }
-      catch { throw new Error('Gemini returned an invalid dictionary result. Please try again.') }
-      if (!parsed.norwegian_word || !parsed.english_meaning || !parsed.forms ||
-          !Array.isArray(parsed.sentences) || typeof parsed.nuances !== 'string') {
-        throw new Error('Gemini returned an incomplete dictionary result. Please try again.')
-      }
-      setResult(parsed)
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let accumulatedText = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          accumulatedText += decoder.decode(value, { stream: true })
+
+          try {
+            const partialParsed = parse(accumulatedText) as Partial<LookupResult>
+            setResult(partialParsed)
+          } catch {
+            // Ignore parsing anomalies during stream chunks
+          }
+        }
+        accumulatedText += decoder.decode()
+        let parsed: LookupResult
+        try { parsed = JSON.parse(accumulatedText) as LookupResult }
+        catch { throw new Error('Dictionary provider returned an invalid result. Please try again.') }
+        if (!parsed.norwegian_word || !parsed.english_meaning || !parsed.forms ||
+            !Array.isArray(parsed.sentences) || typeof parsed.nuances !== 'string') {
+          throw new Error('Dictionary provider returned an incomplete result. Please try again.')
+        }
+        return parsed
+      })
+      setResult(lookup.result)
+      setFromSavedCard(lookup.fromSavedCard)
     } catch (err) {
       setResult(null)
       setError(err instanceof Error ? err.message : 'Lookup failed.')
