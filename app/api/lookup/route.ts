@@ -1,7 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenAI } from '@google/genai'
 
+const PRIMARY_MODEL = 'gemini-3.5-flash-lite'
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite'
+
+function geminiStatus(err: unknown) {
+  const upstream = err as { status?: number | string; code?: number | string; message?: string } | null
+  const details = upstream?.message ?? ''
+  const status = upstream?.status ?? upstream?.code
+  const isRateLimited = status === 429 || status === '429' ||
+    /\b(429|RESOURCE_EXHAUSTED)\b/i.test(details)
+  const isClientError = [400, 401, 403, 404].includes(Number(status))
+  const isUnavailable = !isClientError && !isRateLimited &&
+    (status === 503 || status === '503' || status === 'UNAVAILABLE' ||
+      /\b(503|UNAVAILABLE)\b/i.test(details))
+  return { status, isRateLimited, isUnavailable }
+}
+
+function logStatus(err: unknown) {
+  const { status } = geminiStatus(err)
+  return typeof status === 'number' ? status : status === 'UNAVAILABLE' ? status : 'unknown'
+}
+
 export async function POST(req: NextRequest) {
+  let attemptedModel: string | null = null
   try {
     const { word } = await req.json()
     const customKey = req.headers.get('x-gemini-key')
@@ -38,26 +60,39 @@ Return ONLY raw valid JSON matching this schema (do NOT use markdown backticks):
   "nuances": "..."
 }`
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash-lite',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    })
+    const generate = (model: string) => {
+      attemptedModel = model
+      return ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      })
+    }
+
+    let response
+    try {
+      response = await generate(PRIMARY_MODEL)
+    } catch (err: unknown) {
+      const failure = geminiStatus(err)
+      console.error('Gemini lookup model failed', { model: PRIMARY_MODEL, status: logStatus(err) })
+      if (failure.isRateLimited || !failure.isUnavailable) throw err
+      response = await generate(FALLBACK_MODEL)
+    }
 
     if (!response.text) throw new Error('Gemini returned an empty dictionary result.')
+    console.info('Gemini lookup served', { model: attemptedModel })
     return new Response(response.text.replace(/```json/g, '').replace(/```/g, ''), {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
       },
     })
   } catch (err: unknown) {
-    console.error(err)
+    if (attemptedModel === FALLBACK_MODEL) {
+      console.error('Gemini lookup model failed', { model: FALLBACK_MODEL, status: logStatus(err) })
+    }
     const upstream = err as { status?: number | string; code?: number; message?: string }
     const details = upstream?.message ?? ''
-    const isRateLimited = upstream?.status === 429 || upstream?.code === 429 ||
-      /\b(429|RESOURCE_EXHAUSTED)\b/i.test(details)
+    const { isRateLimited } = geminiStatus(err)
     if (isRateLimited) {
       return NextResponse.json({ error: 'Gemini rate limit reached. Please wait and try again; if your daily free quota is exhausted, try again tomorrow.' }, { status: 429 })
     }
