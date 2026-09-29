@@ -1,13 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import SettingsModal from '@/components/SettingsModal'
 import { supabaseConfigurationError } from '@/lib/supabase'
 import { useProfile } from '@/components/ProfileProvider'
 
 export default function Header() {
   const { activeProfile, selectOrCreateProfile } = useProfile()
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [error, setError] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [usernameInput, setUsernameInput] = useState('')
@@ -48,7 +46,6 @@ export default function Header() {
         </div>
 
         <div className="relative">
-          {activeProfile && <button type="button" onClick={() => setSettingsOpen(true)} className="mr-3 text-sm font-medium text-sky-700">API key</button>}
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
@@ -105,7 +102,6 @@ export default function Header() {
           )}
         </div>
       </div>
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )
 }

@@ -79,17 +79,6 @@ export function deleteProfile(name: string) {
   }
 }
 
-export function setProfileGeminiKey(name: string, key: string) {
-  const all = readAll()
-  if (!all[name]) return
-  all[name].geminiKey = key.trim()
-  writeAll(all)
-}
-
-export function getProfileGeminiKey(name: string): string {
-  return readAll()[name]?.geminiKey ?? ''
-}
-
 export function getProfileFlashcards(name: string): StoredFlashcard[] {
   return readAll()[name]?.flashcards ?? []
 }

@@ -4,15 +4,12 @@ import React, { createContext, useCallback, useContext, useRef, useState } from 
 import { supabase } from '@/lib/supabase'
 import type { Flashcard, LookupResult } from '@/lib/types'
 import { newSchedulingFields, scheduleReview, schedulerParameters, schedulerVersion } from '@/lib/fsrs'
-import { getProfileGeminiKey } from '@/lib/profiles'
 import type { Grade } from 'ts-fsrs'
 
 type Profile = { id: string; username: string }
 type ProfileContextType = {
   activeProfile: Profile | null
   ready: boolean
-  geminiKey: string
-  saveKey: (key: string) => void
   flashcards: Flashcard[]
   dueCards: Flashcard[]
   selectOrCreateProfile: (username: string) => Promise<void>
@@ -24,7 +21,6 @@ type ProfileContextType = {
   reviewCard: (card: Flashcard, grade: Grade) => Promise<void>
 }
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined)
-const keyStorage = (id: string) => `norsk-ord:gemini-key:${id}`
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null)
@@ -34,7 +30,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const allRequest = useRef(0)
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
   const [dueCards, setDueCards] = useState<Flashcard[]>([])
-  const [geminiKey, setGeminiKey] = useState('')
   const reviewing = useRef(new Set<string>())
 
   async function selectOrCreateProfile(username: string) {
@@ -58,17 +53,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setActiveProfile(profile)
     setFlashcards([])
     setDueCards([])
-    // Read the original local profile key as a fallback; do not rewrite its cards.
-    let key = ''
-    try { key = localStorage.getItem(keyStorage(profile.id)) ?? getProfileGeminiKey(profile.username) } catch {}
-    setGeminiKey(key)
-  }
-
-  function saveKey(key: string) {
-    const profile = profileRef.current
-    if (!profile) throw new Error('Select a profile first.')
-    localStorage.setItem(keyStorage(profile.id), key.trim())
-    setGeminiKey(key.trim())
   }
 
   const loadFlashcards = useCallback(async () => {
@@ -198,7 +182,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  return <ProfileContext.Provider value={{ activeProfile, ready: true, geminiKey, saveKey,
+  return <ProfileContext.Provider value={{ activeProfile, ready: true,
     flashcards, dueCards, selectOrCreateProfile, loadFlashcards, loadDueCards,
     findSavedWord, saveFlashcard, removeFlashcard, reviewCard }}>{children}</ProfileContext.Provider>
 }
