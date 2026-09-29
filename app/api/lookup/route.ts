@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenAI } from '@google/genai'
 
-const PRIMARY_MODEL = 'gemini-3.5-flash-lite'
-const FALLBACK_MODEL = 'gemini-3.1-flash-lite'
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 const GROQ_MODEL = 'openai/gpt-oss-120b'
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions'
 
@@ -39,15 +38,20 @@ function isDictionary(value: unknown): boolean {
 
 async function groqLookup(prompt: string): Promise<string> {
   const key = process.env.GROQ_API_KEY
-  if (!key) throw new Error('Groq API key is not configured.')
-  const response = await fetch(GROQ_ENDPOINT, {
+  if (!key) throw Object.assign(new Error('Groq API key is not configured.'), { configurationError: true })
+  let response: Response
+  try { response = await fetch(GROQ_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: GROQ_MODEL, messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_schema', json_schema: {
         name: 'dictionary_lookup', strict: false, schema: dictionarySchema,
       } }, stream: false }),
-  })
+  }) } catch (err) {
+    // Network transport failures are availability errors; other bugs must surface normally.
+    if (err instanceof TypeError) throw Object.assign(new Error('Groq connection failed.'), { status: 503 })
+    throw err
+  }
   if (!response.ok) {
     // Never expose provider bodies or headers: they may contain private data.
     throw Object.assign(new Error('Groq lookup failed.'), { status: response.status })
@@ -61,41 +65,27 @@ async function groqLookup(prompt: string): Promise<string> {
   return JSON.stringify(result)
 }
 
-function geminiStatus(err: unknown) {
-  const upstream = err as { status?: number | string; code?: number | string; message?: string } | null
-  const details = upstream?.message ?? ''
-  const status = upstream?.status ?? upstream?.code
-  const isRateLimited = status === 429 || status === '429' ||
-    /\b(429|RESOURCE_EXHAUSTED)\b/i.test(details)
-  const isClientError = [400, 401, 403, 404].includes(Number(status))
-  const isUnavailable = !isClientError && !isRateLimited &&
-    (status === 503 || status === '503' || status === 'UNAVAILABLE' ||
-      /\b(503|UNAVAILABLE)\b/i.test(details))
-  return { status, isRateLimited, isUnavailable }
+function safeStatus(err: unknown): number | 'unknown' {
+  const code = (err as { status?: unknown; code?: unknown } | null)?.status ??
+    (err as { code?: unknown } | null)?.code
+  const numeric = typeof code === 'string' && /^\d{3}$/.test(code) ? Number(code) : code
+  return typeof numeric === 'number' && Number.isInteger(numeric) && numeric >= 400 && numeric <= 599
+    ? numeric : 'unknown'
 }
 
-function logStatus(err: unknown) {
-  const { status } = geminiStatus(err)
-  return typeof status === 'number' ? status : status === 'UNAVAILABLE' ? status : 'unknown'
+function geminiRateLimited(err: unknown): boolean {
+  const upstream = err as { status?: number | string; code?: number | string; message?: string } | null
+  return safeStatus(err) === 429 || upstream?.code === 'RESOURCE_EXHAUSTED' ||
+    /\b(429|RESOURCE_EXHAUSTED)\b/i.test(upstream?.message ?? '')
 }
 
 export async function POST(req: NextRequest) {
-  let attemptedModel: string | null = null
-  let attemptedGroq = false
+  let attemptedGemini = false
   try {
     const { word } = await req.json()
-    const customKey = req.headers.get('x-gemini-key')
-    const apiKey = customKey || process.env.GEMINI_API_KEY
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'Gemini API key is missing.' },
-        { status: 400 }
-      )
+    if (typeof word !== 'string' || !word.trim()) {
+      return NextResponse.json({ error: 'Enter a Norwegian word to look up.' }, { status: 400 })
     }
-
-    const ai = new GoogleGenAI({ apiKey })
-
     const prompt = `You are a precise Norwegian-English dictionary.
 Provide full details for the Norwegian word: "${word}".
 
@@ -118,63 +108,61 @@ Return ONLY raw valid JSON matching this schema (do NOT use markdown backticks):
   "nuances": "..."
 }`
 
-    const generate = (model: string) => {
-      attemptedModel = model
-      return ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
-      })
-    }
-
-    let response
     try {
-      response = await generate(PRIMARY_MODEL)
+      const result = await groqLookup(prompt)
+      console.info('Dictionary lookup served', { provider: 'Groq', model: GROQ_MODEL })
+      return new Response(result, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
     } catch (err: unknown) {
-      const failure = geminiStatus(err)
-      console.error('Gemini lookup model failed', { model: PRIMARY_MODEL, status: logStatus(err) })
-      if (failure.isRateLimited || !failure.isUnavailable) throw err
-      try {
-        response = await generate(FALLBACK_MODEL)
-      } catch (fallbackError: unknown) {
-        console.error('Gemini lookup model failed', { model: FALLBACK_MODEL, status: logStatus(fallbackError) })
-        if (!geminiStatus(fallbackError).isUnavailable) throw fallbackError
-        attemptedGroq = true
-        const result = await groqLookup(prompt)
-        console.info('Dictionary lookup served', { provider: 'Groq', model: GROQ_MODEL })
-        return new Response(result, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
+      const status = safeStatus(err)
+      console.error('Dictionary lookup model failed', { provider: 'Groq', model: GROQ_MODEL, status })
+      if ((err as { configurationError?: boolean })?.configurationError) {
+        return NextResponse.json({ error: 'Groq API key is not configured on the server.' }, { status: 503 })
+      }
+      if (status === 429) {
+        return NextResponse.json({ error: 'Groq rate limit reached. Please wait and try again.' }, { status: 429 })
+      }
+      if (status === 400 || status === 401 || status === 403 || status === 404) {
+        return NextResponse.json({ error: status === 401 || status === 403
+          ? 'Groq authentication failed. Check the server API key.'
+          : 'Groq could not process this lookup. Please try another word.' }, { status })
+      }
+      if (typeof status !== 'number' || status < 500 || status > 599) {
+        return NextResponse.json({ error: 'Groq returned an invalid dictionary result. Please try again.' }, { status: 502 })
       }
     }
 
+    // One Gemini attempt only, and only after a Groq availability/server failure.
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'Dictionary lookup is temporarily unavailable. Gemini fallback is not configured.' }, { status: 503 })
+    }
+    attemptedGemini = true
+    const ai = new GoogleGenAI({ apiKey })
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+    })
     if (!response.text) throw new Error('Gemini returned an empty dictionary result.')
-    console.info('Dictionary lookup served', { provider: 'Gemini', model: attemptedModel })
+    console.info('Dictionary lookup served', { provider: 'Gemini', model: GEMINI_MODEL })
     return new Response(response.text.replace(/```json/g, '').replace(/```/g, ''), {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-      },
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     })
   } catch (err: unknown) {
-    if (attemptedGroq) {
-      const status = (err as { status?: unknown })?.status
-      console.error('Dictionary lookup model failed', { provider: 'Groq', model: GROQ_MODEL,
-        status: typeof status === 'number' ? status : 'unknown' })
+    if (attemptedGemini) {
+      console.error('Dictionary lookup model failed', { provider: 'Gemini', model: GEMINI_MODEL, status: safeStatus(err) })
+      if (geminiRateLimited(err)) {
+        return NextResponse.json({ error: 'Gemini fallback rate limit reached. Please wait and try again.' }, { status: 429 })
+      }
+      const status = safeStatus(err)
+      if (status === 401 || status === 403) {
+        return NextResponse.json({ error: 'Gemini fallback rejected its server API key.' }, { status })
+      }
+      if (status === 400 || status === 404) {
+        return NextResponse.json({ error: 'Gemini fallback could not process this lookup.' }, { status })
+      }
+      return NextResponse.json({ error: 'Both dictionary providers are temporarily unavailable. Please try again later.' }, { status: 502 })
     }
-    const upstream = err as { status?: number | string; code?: number; message?: string }
-    const { isRateLimited } = geminiStatus(err)
-    if (attemptedGroq) {
-      return NextResponse.json({ error: 'Dictionary lookup is temporarily unavailable. Please try again later.' }, { status: 502 })
-    }
-    if (isRateLimited) {
-      return NextResponse.json({ error: 'Gemini rate limit reached. Please wait and try again; if your daily free quota is exhausted, try again tomorrow.' }, { status: 429 })
-    }
-    const status = typeof upstream?.status === 'number' ? upstream.status : upstream?.code
-    const safeStatus = status === 400 || status === 401 || status === 403 || status === 404 || status === 503 ? status : 502
-    return NextResponse.json(
-      { error: safeStatus === 401 || safeStatus === 403 ? 'Gemini rejected the API key. Check the key in Settings.'
-        : safeStatus === 404 ? 'Gemini model unavailable for this API key.'
-        : safeStatus === 400 ? 'Gemini could not process this lookup. Try another word.'
-        : 'Gemini lookup is temporarily unavailable. Please try again.' },
-      { status: safeStatus }
-    )
+    return NextResponse.json({ error: 'Could not process the lookup request.' }, { status: 400 })
   }
 }

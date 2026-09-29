@@ -15,7 +15,6 @@ export default function Home() {
   const {
     activeProfile,
     ready,
-    geminiKey,
     flashcards = [],
     saveFlashcard,
     removeFlashcard,
@@ -64,7 +63,6 @@ export default function Home() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-gemini-key': geminiKey || '',
           },
           body: JSON.stringify({ word: word.trim() }),
         })
